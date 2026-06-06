@@ -2,19 +2,23 @@ import { NextRequest } from 'next/server';
 
 const HYPERBOLIC_API_URL = 'https://api.hyperbolic.xyz/v1/chat/completions';
 const HYPERBOLIC_API_KEY = process.env.HYPERBOLIC_API_KEY!;
+const PRIMARY_MODEL = 'Qwen/Qwen3-Coder-480B-A35B-Instruct';
+const FALLBACK_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const requestedModel = body.model || PRIMARY_MODEL;
 
-    const response = await fetch(HYPERBOLIC_API_URL, {
+    // Try primary model first, fallback if 500
+    let response = await fetch(HYPERBOLIC_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${HYPERBOLIC_API_KEY}`,
       },
       body: JSON.stringify({
-        model: body.model || 'Qwen/Qwen3-Coder-480B-A35B-Instruct',
+        model: requestedModel,
         messages: body.messages,
         stream: body.stream !== undefined ? body.stream : true,
         temperature: body.temperature ?? 0.3,
@@ -22,6 +26,25 @@ export async function POST(request: NextRequest) {
         max_tokens: body.max_tokens ?? 65536,
       }),
     });
+
+    // If primary model fails with 500, retry with fallback
+    if (response.status === 500 && requestedModel !== FALLBACK_MODEL) {
+      response = await fetch(HYPERBOLIC_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${HYPERBOLIC_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: FALLBACK_MODEL,
+          messages: body.messages,
+          stream: body.stream !== undefined ? body.stream : true,
+          temperature: body.temperature ?? 0.3,
+          top_p: body.top_p ?? 0.95,
+          max_tokens: body.max_tokens ?? 65536,
+        }),
+      });
+    }
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
