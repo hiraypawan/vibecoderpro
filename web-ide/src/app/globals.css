@@ -1,0 +1,283 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d2d;
+  --bg-hover: #37373d;
+  --bg-active: #04395e;
+  --bg-input: #3c3c3c;
+  --bg-sidebar: #252526;
+  --bg-editor: #1e1e1e;
+  --bg-panel: #1e1e1e;
+  --bg-statusbar: #007acc;
+  --bg-menubar: #3c3c3c;
+  --bg-tab-active: #1e1e1e;
+  --bg-tab-inactive: #2d2d2d;
+  --bg-scrollbar: #424242;
+  --bg-scrollbar-hover: #4f4f4f;
+
+  --border-primary: #3c3c3c;
+  --border-subtle: #333333;
+  --border-active: #007acc;
+
+  --text-primary: #cccccc;
+  --text-secondary: #969696;
+  --text-muted: #6a6a6a;
+  --text-bright: #e0e0e0;
+  --text-white: #ffffff;
+
+  --accent-blue: #007acc;
+  --accent-green: #4ec9b0;
+  --accent-red: #f44747;
+  --accent-yellow: #dcdcaa;
+  --accent-orange: #ce9178;
+  --accent-purple: #c586c0;
+  --accent-cyan: #9cdcfe;
+  --accent-pink: #d16d9e;
+
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-comment: #6a9955;
+  --syntax-function: #dcdcaa;
+  --syntax-variable: #9cdcfe;
+  --syntax-type: #4ec9b0;
+
+  /* Safe areas for all devices */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html, body, #__next {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-scrollbar); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--bg-scrollbar-hover); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Selection */
+::selection { background: rgba(38, 79, 120, 0.6); }
+
+/* Focus ring */
+*:focus-visible { outline: 1px solid var(--accent-blue); outline-offset: -1px; }
+
+/* Monaco overrides */
+.monaco-editor .margin { background: var(--bg-editor) !important; }
+.monaco-editor { border-radius: 0 !important; }
+.monaco-editor .minimap-decorations-layer { opacity: 0.6; }
+.monaco-editor .scroll-decoration { display: none !important; }
+
+/* Resize handle animation */
+.resize-handle-active { background: var(--accent-blue) !important; }
+
+/* ========== SAFE AREAS ========== */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* ========== MOBILE (phones) ========== */
+@media (max-width: 767px) {
+  html, body, #__next {
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .monaco-editor .minimap { display: none !important; }
+  .monaco-editor .margin { width: 8px !important; }
+  .monaco-editor { font-size: 13px !important; }
+
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+
+  /* Mobile chat panel */
+  .chat-panel { font-size: 13px; }
+
+  /* Prevent iOS zoom on input focus - MUST be 16px minimum */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="number"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Touch-friendly buttons - iOS 44px minimum */
+  button, [role="button"], a {
+    min-height: 44px;
+  }
+
+  /* Bottom safe area for home indicator */
+  .bottom-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Prevent overscroll bounce */
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+/* ========== TABLET (iPad, Android tablets) ========== */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .monaco-editor .minimap { display: none !important; }
+
+  /* Slightly larger touch targets for tablet */
+  button, [role="button"] {
+    min-height: 36px;
+  }
+}
+
+/* Large tablets and small laptops */
+@media (min-width: 1025px) and (max-width: 1280px) {
+  .monaco-editor .minimap { display: none !important; }
+}
+
+/* ========== TOUCH DEVICES ========== */
+@media (pointer: coarse) {
+  /* Larger tap targets for touch */
+  button, [role="button"], a, input, select, textarea {
+    min-height: 44px;
+  }
+
+  /* Wider scrollbars for touch */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+
+  /* Disable hover effects on touch */
+  :hover { transition: none; }
+}
+
+/* ========== PRECISION DEVICES (mouse) ========== */
+@media (pointer: fine) {
+  button, [role="button"] {
+    min-height: auto;
+  }
+}
+
+/* ========== DARK MODE PREFERENCE ========== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+/* ========== REDUCED MOTION ========== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ========== HIGH CONTRAST ========== */
+@media (forced-colors: active) {
+  button, [role="button"] {
+    border: 1px solid ButtonText;
+  }
+}
+
+/* Panel resize handle hover state */
+[data-resize-handle]:hover {
+  background: var(--accent-blue) !important;
+}
+
+/* Prevent text selection during resize */
+body[data-resizing] {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+body[data-resizing] * {
+  cursor: col-resize !important;
+  pointer-events: none !important;
+}
+
+/* Context menu backdrop */
+.context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+}
+
+/* Smooth transitions for panels */
+.panel-transition {
+  transition: width 0.15s ease, height 0.15s ease;
+}
+
+/* Pulse animation for streaming */
+@keyframes stream-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.animate-stream {
+  animation: stream-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-warn {
+  animation: pulse-warn 2s ease-in-out infinite;
+}
+
+/* ========== LANDSCAPE PHONE ========== */
+@media (max-height: 500px) and (orientation: landscape) {
+  /* Compact header in landscape */
+  .mobile-header { height: 32px !important; }
+  
+  /* Compact bottom bar */
+  .mobile-bottom-bar { 
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+  
+  /* Show more content in landscape */
+  .mobile-bottom-bar button {
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+  }
+}
+
+/* ========== FOLDABLE DEVICES ========== */
+@supports (height: 100dvh) {
+  .h-screen {
+    height: 100dvh; /* Dynamic viewport height for foldables */
+  }
+}
+
+/* ========== PWA STANDALONE ========== */
+@media all and (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "techStack": ["Node.js"],
+  "codeStyle": {
+    "indentation": "spaces",
+    "indentSize": 2,
+    "namingConvention": "camelCase",
+    "bracketStyle": "stroustrup",
+    "lineLength": 100
+  },
+  "domainTerms": [],
+  "lastUpdated": "2026-05-24T05:30:00.000Z",
+  "fileCount": 10
+}

@@ -1,0 +1,16 @@
+node_modules/
+web-ide/node_modules/
+.vibe/
+.vibe_backups/
+.vibe_analysis/
+.vibe_collab/
+.vibe_explanations/
+hii/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+Thumbs.db
+web-ide/.next/
+web-ide/out/

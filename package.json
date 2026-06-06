@@ -1,0 +1,36 @@
+{
+  "name": "alpha-agent",
+  "version": "2.0.0",
+  "description": "Distributed Agentic IDE Workspace — Cloudflare Worker API Gateway + Next.js Cloud IDE + MongoDB Atlas Telemetry",
+  "private": true,
+  "scripts": {
+    "dev:worker": "cd worker && npx wrangler dev",
+    "deploy:worker": "cd worker && npx wrangler deploy",
+    "dev:web": "cd web-ide && npm run dev",
+    "build:web": "cd web-ide && npm run build",
+    "start:web": "cd web-ide && npm run start",
+    "dev": "concurrently \"npm run dev:worker\" \"npm run dev:web\"",
+    "lint": "cd web-ide && npm run lint",
+    "typecheck": "cd web-ide && npx tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "eslint": "^8.57.1",
+    "prettier": "^3.0.0"
+  },
+  "keywords": [
+    "ai",
+    "cloud-ide",
+    "code-generation",
+    "cloudflare-workers",
+    "next.js",
+    "monaco-editor",
+    "mongodb-atlas",
+    "agentic"
+  ],
+  "author": "Vibe Coder Team",
+  "license": "MIT"
+}

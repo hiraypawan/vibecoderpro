@@ -1,0 +1,19 @@
+You have a directed graph represented as:
+  { nodes: ["A","B","C","D"], edges: [["A","B"],["B","C"],["A","D"],["D","C"]] }
+
+Write a function topologicalSort(graph) that returns nodes in valid execution order.
+Handle these cases:
+  1. Valid DAG — returns ordered array
+  2. Single node — returns [that node]
+  3. 1000-node chain — completes in <100ms
+  4. Graph with cycle — returns { error: "cycle", path: ["A","B","C","A"] }
+  5. Empty graph — returns []
+  6. Invalid input (null, missing nodes field) — throws TypeError
+
+Implementation requirements:
+  - O(V+E) time complexity
+  - Use Kahn's algorithm (BFS-based) or DFS with coloring
+  - Pure function, no side effects
+  - Export as module: module.exports = { topologicalSort }
+
+Write the implementation to a file called topological-sort.js

@@ -1,0 +1,17 @@
+name = "vibe-api-gateway"
+main = "index.js"
+compatibility_date = "2024-12-01"
+
+[vars]
+MONGO_DATABASE = "vibe_telemetry"
+MONGO_COLLECTION = "generation_logs"
+
+[env.production]
+name = "vibe-api-gateway-prod"
+vars = { MONGO_DATABASE = "vibe_telemetry", MONGO_COLLECTION = "generation_logs" }
+
+[env.production.secrets]
+KEYS_JSON = ""
+MONGO_DATA_API_ENDPOINT = ""
+MONGO_DATA_API_KEY = ""
+MONGO_APP_ID = ""

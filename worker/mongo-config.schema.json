@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MongoDB Atlas Data API Configuration",
+  "description": "Configuration document for the MongoDB Atlas Data API endpoints used by Vibe Coder Pro telemetry",
+  "type": "object",
+  "required": ["endpoint", "apiKey", "appId", "database", "collection"],
+  "properties": {
+    "endpoint": {
+      "type": "string",
+      "description": "The MongoDB Atlas Data API base endpoint URL",
+      "examples": ["https://data.mongodb-api.com/app/your-app-id/endpoint/data/v1"],
+      "pattern": "^https://data\\.mongodb-api\\.com/app/.+/endpoint/data/v1$"
+    },
+    "apiKey": {
+      "type": "string",
+      "description": "The API key for authenticating with the Atlas Data API",
+      "minLength": 24
+    },
+    "appId": {
+      "type": "string",
+      "description": "The Atlas App Services application ID"
+    },
+    "database": {
+      "type": "string",
+      "description": "Target database name for telemetry logs",
+      "default": "vibe_telemetry"
+    },
+    "collection": {
+      "type": "string",
+      "description": "Target collection name for generation log documents",
+      "default": "generation_logs"
+    },
+    "project": {
+      "type": "string",
+      "description": "MongoDB Atlas project ID"
+    },
+    "cluster": {
+      "type": "string",
+      "description": "MongoDB Atlas cluster name"
+    }
+  },
+  "examples": [
+    {
+      "endpoint": "https://data.mongodb-api.com/app/abc123/endpoint/data/v1",
+      "apiKey": "your-api-key-here",
+      "appId": "abc123",
+      "database": "vibe_telemetry",
+      "collection": "generation_logs",
+      "project": "64a1b2c3d4e5f6a7b8c9d0e1",
+      "cluster": "Cluster0"
+    }
+  ]
+}

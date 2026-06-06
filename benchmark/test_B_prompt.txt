@@ -1,0 +1,12 @@
+Build a class ReactiveGraph that supports:
+  .addNode(id, type, config)   // types: "const", "add", "multiply", "display"
+  .connect(fromId, toId, port)
+  .setInput(id, value)         // triggers full re-evaluation
+  .getValue(id)
+
+Rules: const nodes hold a value. add takes 2 inputs, produces sum. multiply takes 2 inputs.
+display logs its input. setInput on a const must propagate through all downstream nodes.
+Detect circular dependencies and throw on connect().
+
+Write the implementation to a file called reactive-graph.js and export it as:
+  module.exports = { ReactiveGraph }
