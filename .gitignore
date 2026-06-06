@@ -1,16 +1,33 @@
+# dependencies
 node_modules/
-web-ide/node_modules/
-.vibe/
-.vibe_backups/
-.vibe_analysis/
-.vibe_collab/
-.vibe_explanations/
-hii/
-.env
-.env.local
-.env.*.local
-*.log
+.pnp
+.pnp.js
+
+# testing
+coverage/
+
+# next.js
+.next/
+out/
+
+# production
+build/
+
+# misc
 .DS_Store
-Thumbs.db
-web-ide/.next/
-web-ide/out/
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts

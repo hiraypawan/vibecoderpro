@@ -1,0 +1,23 @@
+{
+  "name": "vibe-coder-pro",
+  "version": "1.0.0",
+  "description": "Advanced AI-powered coding assistant with autonomous capabilities",
+  "main": "agent.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node agent.mjs",
+    "dev": "node --watch agent.mjs",
+    "test": "node --test test/*.test.js",
+    "clean": "rm -rf .vibe_backups .vibe_analysis .vibe_explanations .vibe_collab"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
+  },
+  "keywords": ["ai", "coding", "assistant", "llm", "developer-tools"],
+  "author": "Vibe Coder Team",
+  "license": "MIT"
+}
