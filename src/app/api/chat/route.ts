@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
         'Authorization': `Bearer ${HYPERBOLIC_API_KEY}`,
       },
       body: JSON.stringify({
-        model: body.model || 'meta-llama/Llama-3.3-70B-Instruct',
+        model: body.model || 'Qwen/Qwen3-Coder-480B-A35B-Instruct',
         messages: body.messages,
         stream: body.stream !== undefined ? body.stream : true,
         temperature: body.temperature ?? 0.3,

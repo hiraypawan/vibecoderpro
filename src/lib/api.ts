@@ -22,7 +22,7 @@ export async function postChatCompletion(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: payload.model || 'meta-llama/Llama-3.3-70B-Instruct',
+      model: payload.model || 'Qwen/Qwen3-Coder-480B-A35B-Instruct',
       messages: payload.messages,
       stream: payload.stream !== undefined ? payload.stream : true,
       temperature: payload.temperature ?? 0.3,
