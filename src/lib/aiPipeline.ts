@@ -40,9 +40,12 @@ async function readStream(response: Response): Promise<string> {
     buffer = lines.pop() || '';
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed.startsWith('data:') || trimmed === 'data: [DONE]') continue;
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      // Handle both "data: {...}" and raw JSON lines
+      const jsonStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+      if (!jsonStr || !jsonStr.startsWith('{')) continue;
       try {
-        const chunk = JSON.parse(trimmed.slice(5));
+        const chunk = JSON.parse(jsonStr);
         content += chunk.choices?.[0]?.delta?.content || '';
       } catch {}
     }
@@ -51,14 +54,30 @@ async function readStream(response: Response): Promise<string> {
 }
 
 async function callModel(messages: ChatMessage[], opts?: { maxTokens?: number; temperature?: number }): Promise<string> {
+  // Try streaming first
+  try {
+    const response = await postChatCompletion({
+      messages,
+      stream: true,
+      max_tokens: opts?.maxTokens ?? 65536,
+      temperature: opts?.temperature ?? 0.3,
+    }, 'pipeline');
+    if (response.ok) {
+      const content = await readStream(response);
+      if (content.length > 0) return content;
+    }
+  } catch {}
+
+  // Fallback: non-streaming
   const response = await postChatCompletion({
     messages,
-    stream: true,
+    stream: false,
     max_tokens: opts?.maxTokens ?? 65536,
     temperature: opts?.temperature ?? 0.3,
   }, 'pipeline');
   if (!response.ok) throw new Error(`API ${response.status}`);
-  return readStream(response);
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || '';
 }
 
 // ─── Quality Checker (local, no API call) ────────────────────────────────────
