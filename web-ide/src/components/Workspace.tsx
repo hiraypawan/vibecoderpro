@@ -19,14 +19,13 @@ import AdGateDownload from './AdGateDownload';
 import FileImport from './FileImport';
 import AgentLoader from './AgentLoader';
 import StorageBar from './StorageBar';
-import { ChatMessage } from '@/lib/api';
+import { ChatMessage, postChatCompletion } from '@/lib/api';
 import { generateFileTree, FileNode } from '@/lib/filetree';
 import { parseToolBlocks, ToolBlock } from '@/lib/parser';
 import { triggerAd, checkAdFreePass, disableAds, areAdsDisabled } from '@/lib/ads';
 import { usePromptLimit } from '@/lib/usePromptLimit';
 import { useAchievements, AchievementPopup } from './Achievements';
 import { saveLocalProject, getLocalProject, getAllLocalProjects } from '@/lib/localDb';
-import { runMultiAgentPipeline } from '@/lib/aiPipeline';
 import MobileAdBanner from './MobileAdBanner';
 import InlineAd from './InlineAd';
 import {
@@ -424,55 +423,108 @@ export default function Workspace() {
     addLog('system', `User: ${userMessage.substring(0, 100)} | Context: ${compactedHistory.length} msgs, ${hasFiles ? filesRef.current.size + ' files' : 'no files'}`);
 
     try {
-      // Multi-agent pipeline: plan → code → quality check → auto-retry
-      const pipelineResult = await runMultiAgentPipeline({
-        systemPrompt: SYSTEM_PROMPT,
-        fileContext: fileContextMsg,
-        history: compactedHistory,
-        userMessage,
-        existingFiles: new Set(filesRef.current.keys()),
-        onStreamUpdate: (content, phaseMsg) => {
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            if (last?.role === 'assistant') { last.content = content; }
-            else { updated.push({ role: 'assistant', content }); }
-            return updated;
-          });
-          setAiTask(phaseMsg);
-        },
-        onPhaseChange: (phase) => {
-          const labels: Record<string, string> = {
-            planning: 'Planning architecture...',
-            coding: 'Generating code...',
-            reviewing: 'Verifying quality...',
-            fixing: 'Auto-fixing issues...',
-            done: 'Finalizing...',
-          };
-          setAiTask(labels[phase] || phase);
-          addLog('system', `Phase: ${phase}`);
-        },
-      });
+      // Build messages for API call
+      const systemMsg: ChatMessage = { role: 'system', content: SYSTEM_PROMPT };
+      const messagesToSend: ChatMessage[] = [systemMsg];
+      if (fileContextMsg) messagesToSend.push(fileContextMsg);
+      messagesToSend.push(...compactedHistory);
+      messagesToSend.push({ role: 'user', content: userMessage });
 
-      // Show final content
-      setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === 'assistant') { last.content = pipelineResult.content; }
-        else { updated.push({ role: 'assistant', content: pipelineResult.content }); }
-        return updated;
-      });
+      // Phase 1: Stream response in real-time
+      setAiTask('Generating response...');
+      const response = await postChatCompletion({ messages: messagesToSend }, 'local-session');
+      if (!response.ok) { const e = await response.text().catch(() => ''); throw new Error(`API ${response.status}: ${e.substring(0, 200)}`); }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let assistantContent = '';
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:') || trimmed === 'data: [DONE]') continue;
+          try {
+            const chunk = JSON.parse(trimmed.slice(5));
+            const delta = chunk.choices?.[0]?.delta?.content || '';
+            assistantContent += delta;
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === 'assistant') { last.content = assistantContent; }
+              else { updated.push({ role: 'assistant', content: assistantContent }); }
+              return updated;
+            });
+          } catch {}
+        }
+      }
 
-      // Log pipeline stats
-      if (pipelineResult.plan) addLog('info', 'Plan generated for complex request');
-      if (pipelineResult.retryCount > 0) addLog('warn', `Auto-retried ${pipelineResult.retryCount}x to fix quality`);
-      if (pipelineResult.qualityIssues.length > 0) addLog('warn', `${pipelineResult.qualityIssues.length} quality issue(s) remain after retry`);
-
-      const finalBlocks = parseToolBlocks(pipelineResult.content, new Set(filesRef.current.keys()));
+      // Phase 2: Parse and apply tool blocks
+      const finalBlocks = parseToolBlocks(assistantContent, new Set(filesRef.current.keys()));
       addLog('system', `Parser found ${finalBlocks.length} block(s): ${finalBlocks.map((b) => `${b.type}:${b.path || b.cmd || '?'}`).join(', ') || 'none'}`);
+
+      // Phase 3: Quality check on code blocks
+      const codeBlocks = finalBlocks.filter(b => b.type === 'write');
+      if (codeBlocks.length > 0) {
+        setAiTask('Verifying code quality...');
+        const { checkLocalQuality } = await import('@/lib/aiPipeline');
+        const issues = checkLocalQuality(codeBlocks as any);
+        if (issues.length > 0) {
+          addLog('warn', `Quality check found ${issues.length} issue(s): ${issues.map(i => `${i.file}: ${i.type}`).join(', ')}`);
+          // Auto-retry once for code requests with quality issues
+          setAiTask('Auto-fixing quality issues...');
+          const fixPrompt = `Your previous response had these code quality issues:\n${issues.map(i => `- ${i.file}: ${i.detail} (${i.type})`).join('\n')}\n\nPlease fix ALL issues and output the COMPLETE corrected files. No truncation, no placeholders.`;
+          const fixMessages: ChatMessage[] = [
+            ...messagesToSend,
+            { role: 'assistant', content: assistantContent },
+            { role: 'user', content: fixPrompt },
+          ];
+          const fixResponse = await postChatCompletion({ messages: fixMessages }, 'local-session');
+          if (fixResponse.ok && fixResponse.body) {
+            const fixReader = fixResponse.body.getReader();
+            let fixContent = '';
+            let fixBuffer = '';
+            while (true) {
+              const { done, value } = await fixReader.read();
+              if (done) break;
+              fixBuffer += decoder.decode(value, { stream: true });
+              const fixLines = fixBuffer.split('\n');
+              fixBuffer = fixLines.pop() || '';
+              for (const line of fixLines) {
+                const t = line.trim();
+                if (!t.startsWith('data:') || t === 'data: [DONE]') continue;
+                try {
+                  const c = JSON.parse(t.slice(5));
+                  fixContent += c.choices?.[0]?.delta?.content || '';
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last?.role === 'assistant') { last.content = fixContent; }
+                    else { updated.push({ role: 'assistant', content: fixContent }); }
+                    return updated;
+                  });
+                } catch {}
+              }
+            }
+            // Use fixed content if it has blocks
+            const fixBlocks = parseToolBlocks(fixContent, new Set(filesRef.current.keys()));
+            if (fixBlocks.length > 0) {
+              assistantContent = fixContent;
+              finalBlocks.length = 0;
+              finalBlocks.push(...fixBlocks);
+              addLog('success', 'Auto-fix applied successfully');
+            }
+          }
+        }
+      }
+
+      // Phase 4: Apply tool blocks and save
       if (finalBlocks.length > 0) {
         applyToolBlocks(finalBlocks);
-        // Auto-save files to IndexedDB after AI creates/edits
         if (currentProjectId) {
           try {
             const projRes = await fetch(`/api/projects/${currentProjectId}`);
@@ -484,7 +536,7 @@ export default function Workspace() {
           }
         }
       }
-      addLog('success', `AI response complete${pipelineResult.retryCount > 0 ? ` (${pipelineResult.retryCount} auto-fix applied)` : ''}`);
+      addLog('success', 'AI response complete');
     } catch (error: any) {
       addLog('error', `Error: ${error.message}`);
       setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${error.message}` }]);
