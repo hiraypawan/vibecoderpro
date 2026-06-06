@@ -463,6 +463,12 @@ export default function Workspace() {
         }
       }
 
+      // Check for empty response
+      if (!assistantContent.trim()) {
+        addLog('error', 'AI returned empty response — model may be temporarily unavailable');
+        setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, the AI model returned an empty response. This usually means the model is temporarily unavailable. Please try again in a few seconds.' }]);
+      }
+
       // Phase 2: Parse and apply tool blocks
       const finalBlocks = parseToolBlocks(assistantContent, new Set(filesRef.current.keys()));
       addLog('system', `Parser found ${finalBlocks.length} block(s): ${finalBlocks.map((b) => `${b.type}:${b.path || b.cmd || '?'}`).join(', ') || 'none'}`);
@@ -538,8 +544,9 @@ export default function Workspace() {
       }
       addLog('success', 'AI response complete');
     } catch (error: any) {
-      addLog('error', `Error: ${error.message}`);
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${error.message}` }]);
+      const errMsg = error.message || 'Unknown error';
+      addLog('error', `AI Error: ${errMsg}`);
+      setMessages((prev) => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}\n\nThe AI service may be temporarily unavailable. Please try again.` }]);
     } finally { 
       setIsStreaming(false);
       setAiLoading(false);
