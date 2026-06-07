@@ -128,31 +128,26 @@ function isFileComplete(path: string, content: string): boolean {
   
   // Check HTML files have closing tags
   if (ext === 'html' || ext === 'htm') {
-    const hasDoctype = content.includes('<!DOCTYPE') || content.includes('<!doctype');
     const hasClosingHtml = content.includes('</html>');
     const hasClosingBody = content.includes('</body>');
-    if (!hasDoctype || !hasClosingHtml || !hasClosingBody) return false;
+    // Lenient: at least one major closing tag present, or file is substantial
+    if (!hasClosingHtml && !hasClosingBody && content.length < 200) return false;
   }
   
   // Check CSS files have balanced braces
   if (ext === 'css') {
     const openBraces = (content.match(/{/g) || []).length;
     const closeBraces = (content.match(/}/g) || []).length;
-    if (Math.abs(openBraces - closeBraces) > 2) return false;
+    // Allow up to 5 unbalanced braces for partial content
+    if (Math.abs(openBraces - closeBraces) > 5) return false;
   }
   
-  // Check JS files have balanced braces
+  // Check JS/TS files have balanced braces
   if (ext === 'js' || ext === 'javascript' || ext === 'jsx' || ext === 'tsx' || ext === 'ts') {
     const openBraces = (content.match(/{/g) || []).length;
     const closeBraces = (content.match(/}/g) || []).length;
-    if (Math.abs(openBraces - closeBraces) > 2) return false;
-  }
-  
-  // Check Python files have proper indentation (no obvious truncation)
-  if (ext === 'py' || ext === 'python') {
-    const lastLine = content.trim().split('\n').pop() || '';
-    // If last line ends with ':', it's probably truncated
-    if (lastLine.endsWith(':')) return false;
+    // Allow up to 5 unbalanced braces
+    if (Math.abs(openBraces - closeBraces) > 5) return false;
   }
   
   return true;

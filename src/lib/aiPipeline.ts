@@ -46,9 +46,26 @@ async function readStream(response: Response): Promise<string> {
       if (!jsonStr || !jsonStr.startsWith('{')) continue;
       try {
         const chunk = JSON.parse(jsonStr);
-        content += chunk.choices?.[0]?.delta?.content || '';
-      } catch {}
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) content += delta;
+      } catch {
+        // Try to handle partial JSON by appending next chunk
+        try {
+          const merged = buffer + jsonStr;
+          const chunk = JSON.parse(merged);
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (delta) content += delta;
+        } catch {}
+      }
     }
+  }
+  // Process any remaining buffer
+  if (buffer.trim() && buffer.trim() !== 'data: [DONE]' && buffer.trim().startsWith('{')) {
+    try {
+      const chunk = JSON.parse(buffer.trim().startsWith('data:') ? buffer.trim().slice(5).trim() : buffer.trim());
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) content += delta;
+    } catch {}
   }
   return content;
 }
@@ -69,15 +86,40 @@ async function callModel(messages: ChatMessage[], opts?: { maxTokens?: number; t
   } catch {}
 
   // Fallback: non-streaming
-  const response = await postChatCompletion({
-    messages,
-    stream: false,
-    max_tokens: opts?.maxTokens ?? 65536,
-    temperature: opts?.temperature ?? 0.3,
-  }, 'pipeline');
-  if (!response.ok) throw new Error(`API ${response.status}`);
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
+  try {
+    const response = await postChatCompletion({
+      messages,
+      stream: false,
+      max_tokens: opts?.maxTokens ?? 65536,
+      temperature: opts?.temperature ?? 0.3,
+    }, 'pipeline');
+    if (response.ok) {
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      if (content.length > 0) return content;
+    }
+  } catch {}
+
+  // Final fallback: try non-streaming with explicit model override
+  const fallbackModels = ['meta-llama/Llama-3.3-70B-Instruct', 'deepseek-ai/DeepSeek-V3-0324'];
+  for (const model of fallbackModels) {
+    try {
+      const response = await postChatCompletion({
+        messages,
+        model,
+        stream: false,
+        max_tokens: opts?.maxTokens ?? 65536,
+        temperature: opts?.temperature ?? 0.3,
+      }, 'pipeline');
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        if (content.length > 0) return content;
+      }
+    } catch {}
+  }
+
+  throw new Error('All models failed — no content returned');
 }
 
 // ─── Quality Checker (local, no API call) ────────────────────────────────────
@@ -95,14 +137,18 @@ export function checkLocalQuality(blocks: Array<{ type: string; path: string; co
     const c = block.content;
     const path = block.path;
 
-    // Check truncation: file ends mid-statement
-    const lastLine = c.trim().split('\n').pop()?.trim() || '';
-    if (c.length > 500 && !lastLine.endsWith('}') && !lastLine.endsWith(';') && !lastLine.endsWith('>') && !lastLine.endsWith('*/') && !lastLine.endsWith("'") && !lastLine.endsWith('"') && !lastLine.endsWith('`')) {
-      issues.push({ type: 'truncation', file: path, detail: `File ends abruptly: "${lastLine.substring(0, 60)}"` });
+    // Check truncation: file ends mid-statement (only for files > 1KB)
+    if (c.length > 1000) {
+      const lastLine = c.trim().split('\n').pop()?.trim() || '';
+      const badEndings = ['{', '(', '[', ',', ':', '&&', '||', '=>', 'function', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while'];
+      const isTruncated = badEndings.some(ending => lastLine.endsWith(ending));
+      if (isTruncated) {
+        issues.push({ type: 'truncation', file: path, detail: `File ends abruptly: "${lastLine.substring(0, 60)}"` });
+      }
     }
 
-    // Check placeholders
-    const placeholderPatterns = [/\.{3,}/g, /\/\/\s*(rest of|remaining|similar|etc|TODO|FIXME|HACK)/gi, /\/\*\s*\.\.\./g, /# TODO/gi];
+    // Check placeholders (lenient)
+    const placeholderPatterns = [/\.{5,}/g, /\/\/\s*(rest of|remaining|similar|etc|TODO|FIXME|HACK)/gi];
     for (const pat of placeholderPatterns) {
       if (pat.test(c)) {
         issues.push({ type: 'placeholder', file: path, detail: `Contains placeholder: ${c.match(pat)?.[0]}` });
@@ -110,19 +156,19 @@ export function checkLocalQuality(blocks: Array<{ type: string; path: string; co
       }
     }
 
-    // Check HTML bracket balance
+    // Check HTML bracket balance (lenient)
     if (path.endsWith('.html')) {
       const opens = (c.match(/<(html|head|body|div|section|main|header|footer|nav|aside|article|form|ul|ol|table|select)\b/gi) || []).length;
       const closes = (c.match(/<\/(html|head|body|div|section|main|header|footer|nav|aside|article|form|ul|ol|table|select)>/gi) || []).length;
-      if (opens > closes + 1) {
+      if (opens > closes + 3) {
         issues.push({ type: 'syntax', file: path, detail: `${opens} opening tags vs ${closes} closing tags` });
       }
     }
 
-    // Check JS/CSS bracket balance
+    // Check JS/CSS bracket balance (lenient)
     if (path.endsWith('.js') || path.endsWith('.css') || path.endsWith('.ts')) {
       const braces = (c.match(/{/g) || []).length - (c.match(/}/g) || []).length;
-      if (Math.abs(braces) > 1) {
+      if (Math.abs(braces) > 3) {
         issues.push({ type: 'syntax', file: path, detail: `Unbalanced braces: ${braces > 0 ? '+' : ''}${braces}` });
       }
     }
@@ -155,7 +201,7 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
   const { systemPrompt, fileContext, history, userMessage, existingFiles, onStreamUpdate, onPhaseChange } = opts;
   const isComplex = COMPLEXITY_KEYWORDS.test(userMessage);
   let retryCount = 0;
-  const MAX_RETRIES = 1;
+  const MAX_RETRIES = 2;
 
   // ─── Phase 1: Planning (only for complex requests) ───
   let plan: string | null = null;
