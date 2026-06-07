@@ -132,6 +132,66 @@ export interface QualityIssue {
 
 export function checkLocalQuality(blocks: Array<{ type: string; path: string; content: string }>): QualityIssue[] {
   const issues: QualityIssue[] = [];
+  
+  // Separate files by type
+  const htmlBlocks = blocks.filter(b => b.path.endsWith('.html'));
+  const cssBlocks = blocks.filter(b => b.path.endsWith('.css'));
+  const jsBlocks = blocks.filter(b => b.path.endsWith('.js'));
+  
+  // Cross-file validation: check CSS/JS selectors match HTML classes
+  if (htmlBlocks.length > 0 && cssBlocks.length > 0) {
+    const htmlContent = htmlBlocks.map(b => b.content).join('\n');
+    const cssContent = cssBlocks.map(b => b.content).join('\n');
+    
+    // Extract classes from HTML
+    const htmlClasses = new Set<string>();
+    const classMatches = htmlContent.match(/class="([^"]+)"/g) || [];
+    for (const match of classMatches) {
+      const classList = match.replace('class="', '').replace('"', '').split(/\s+/);
+      for (const cls of classList) {
+        if (cls && !cls.startsWith('fa') && cls !== 'fas' && cls !== 'far' && cls !== 'fab') {
+          htmlClasses.add(cls);
+        }
+      }
+    }
+    
+    // Check that key HTML classes have CSS rules
+    const keyClasses = ['hero', 'features', 'pricing', 'footer', 'nav', 'feature-card', 'pricing-card'];
+    for (const cls of keyClasses) {
+      if (htmlClasses.has(cls) && !cssContent.includes('.' + cls)) {
+        issues.push({ type: 'syntax', file: 'styles.css', detail: `Missing CSS for .${cls} (used in HTML)` });
+      }
+    }
+    
+    // Check Font Awesome is imported if icons are used
+    if (htmlContent.includes('class="fas ') || htmlContent.includes('class="far ') || htmlContent.includes('class="fab ')) {
+      if (!htmlContent.includes('font-awesome') && !htmlContent.includes('cdnjs.cloudflare.com')) {
+        issues.push({ type: 'incomplete', file: 'index.html', detail: 'Font Awesome icons used but CDN not imported in <head>' });
+      }
+    }
+  }
+  
+  // Cross-file validation: check JS selectors match HTML
+  if (htmlBlocks.length > 0 && jsBlocks.length > 0) {
+    const htmlContent = htmlBlocks.map(b => b.content).join('\n');
+    const jsContent = jsBlocks.map(b => b.content).join('\n');
+    
+    // Check that JS querySelector targets exist in HTML
+    const jsSelectors = jsContent.match(/querySelector\(['"]([^'"]+)['"]\)/g) || [];
+    for (const sel of jsSelectors) {
+      const selector = sel.replace(/querySelector\(['"]/, '').replace(/['"]\)/, '');
+      // Skip generic selectors
+      if (selector === 'window' || selector === 'document') continue;
+      // Check if selector (as class or ID) exists in HTML
+      if (selector.startsWith('.') && !htmlContent.includes(selector.substring(1))) {
+        issues.push({ type: 'incomplete', file: 'script.js', detail: `JS targets ${selector} but element not found in HTML` });
+      }
+      if (selector.startsWith('#') && !htmlContent.includes(`id="${selector.substring(1)}"`)) {
+        issues.push({ type: 'incomplete', file: 'script.js', detail: `JS targets ${selector} but ID not found in HTML` });
+      }
+    }
+  }
+
   for (const block of blocks) {
     if (block.type !== 'write' || !block.content) continue;
     const c = block.content;
@@ -200,6 +260,67 @@ const COMPLEXITY_KEYWORDS = /\b(build|create|make|design|full|complete|app|websi
 // Detect when user wants multiple files (landing page, app, etc.)
 const MULTI_FILE_KEYWORDS = /\b(landing page|website|app|dashboard|portfolio|blog|store|shop|forum|chat|game|calculator|weather|todo|notes|resume|agency|saas)\b/i;
 
+// Extract CSS classes and IDs from HTML content for cross-file consistency
+function extractClassesFromHtml(html: string): string {
+  if (!html) return '(no HTML generated yet — use standard classes)';
+  
+  const classMatches = html.match(/class="([^"]+)"/g) || [];
+  const classes = new Set<string>();
+  for (const match of classMatches) {
+    const classList = match.replace('class="', '').replace('"', '').split(/\s+/);
+    for (const cls of classList) {
+      if (cls && !cls.startsWith('fa') && cls !== 'fas' && cls !== 'far' && cls !== 'fab') {
+        classes.add('.' + cls);
+      }
+    }
+  }
+  
+  const idMatches = html.match(/id="([^"]+)"/g) || [];
+  const ids = new Set<string>();
+  for (const match of idMatches) {
+    const id = match.replace('id="', '').replace('"', '');
+    if (id) ids.add('#' + id);
+  }
+  
+  const result = [...classes, ...ids].join(', ');
+  return result || '(no classes found — use standard semantic classes)';
+}
+
+// Extract interactive elements from HTML for JS generation
+function extractElementsFromHtml(html: string): string {
+  if (!html) return '(no HTML generated yet)';
+  
+  const lines: string[] = [];
+  
+  // Find buttons
+  const buttons = html.match(/<button[^>]*class="([^"]+)"[^>]*>/g) || [];
+  if (buttons.length > 0) {
+    lines.push('Buttons: ' + buttons.map(b => {
+      const cls = b.match(/class="([^"]+)"/)?.[1] || '';
+      return cls ? '.' + cls.split(/\s+/)[0] : '<button>';
+    }).join(', '));
+  }
+  
+  // Find nav toggle
+  if (html.includes('nav-toggle')) lines.push('Nav toggle: .nav-toggle');
+  if (html.includes('nav-links')) lines.push('Nav links container: .nav-links');
+  
+  // Find scroll-to-top
+  if (html.includes('scroll-to-top')) lines.push('Scroll-to-top: .scroll-to-top');
+  
+  // Find sections with IDs
+  const sections = html.match(/id="([^"]+)"/g) || [];
+  if (sections.length > 0) {
+    lines.push('Sections: ' + sections.map(s => '#' + s.replace('id="', '').replace('"', '')).join(', '));
+  }
+  
+  // Find feature cards
+  const featureCards = (html.match(/feature-card/g) || []).length;
+  if (featureCards > 0) lines.push(`Feature cards: ${featureCards}x .feature-card`);
+  
+  return lines.join('\n') || '(standard elements)';
+}
+
 export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<PipelineResult> {
   const { systemPrompt, fileContext, history, userMessage, existingFiles, onStreamUpdate, onPhaseChange } = opts;
   const isComplex = COMPLEXITY_KEYWORDS.test(userMessage);
@@ -235,31 +356,82 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
   
   if (isMultiFile) {
     // Generate files one at a time — each gets full output capacity
-    const fileSpecs = [
-      { ext: 'html', prompt: `Create a COMPLETE index.html file for this request. Use <write file="index.html"> tags. Include ALL sections with REAL content — no placeholders. 200+ lines.` },
-      { ext: 'css', prompt: `Create a COMPLETE styles.css file for this request. Use <write file="styles.css"> tags. Include ALL styles with CSS variables, responsive design, dark theme. 200+ lines.` },
-      { ext: 'js', prompt: `Create a COMPLETE script.js file for this request. Use <write file="script.js"> tags. Include ALL interactivity — mobile menu, smooth scroll, animations. 80+ lines.` },
-    ];
-    
+    // CRITICAL: CSS and JS must use the EXACT classes/IDs from the HTML
     const allContents: string[] = [];
     
-    for (const spec of fileSpecs) {
-      try {
-        const fileMessages: ChatMessage[] = [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `${userMessage}\n\n${spec.prompt}` },
-        ];
-        
-        const fileContent = await callModel(fileMessages);
-        if (fileContent.length > 50) {
-          allContents.push(fileContent);
-          onStreamUpdate(allContents.join('\n\n'), `Generated ${spec.ext}...`);
-        }
-      } catch {
-        // If one file fails, continue with others
+    // Step 1: Generate HTML first
+    try {
+      const htmlPrompt = `Create a COMPLETE index.html file for this request. Use <write file="index.html"> tags.
+Include ALL sections with REAL content — no placeholders. 200+ lines.
+Use these CSS classes EXACTLY (CSS and JS will reference them):
+- nav: .navbar, .nav-container, .nav-logo, .nav-toggle, .nav-links
+- hero: .hero, .hero-container, .hero-headline, .hero-subtitle, .hero-cta
+- features: .features, .features-container, .section-title, .features-grid, .feature-card, .feature-icon, .feature-title, .feature-description
+- pricing: .pricing, .pricing-container, .pricing-grid, .pricing-card, .pricing-tier, .pricing-price, .pricing-features, .pricing-cta, .pricing-badge
+- footer: .footer, .footer-container, .footer-grid, .footer-col, .footer-bottom
+- scroll-to-top: .scroll-to-top
+- Use Font Awesome icons: <i class="fas fa-icon-name"></i> (include CDN in <head>)
+- IDs: #features, #pricing, #contact`;
+
+      const htmlContent = await callModel([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `${userMessage}\n\n${htmlPrompt}` },
+      ]);
+      if (htmlContent.length > 50) {
+        allContents.push(htmlContent);
+        onStreamUpdate(htmlContent, 'Generated HTML — creating CSS...');
       }
-    }
-    
+    } catch {}
+
+    // Step 2: Generate CSS — must match HTML classes exactly
+    try {
+      const htmlClasses = extractClassesFromHtml(allContents[0] || '');
+      const cssPrompt = `Create a COMPLETE styles.css file. Use <write file="styles.css"> tags.
+CRITICAL: You MUST style EXACTLY these classes and IDs from the HTML (no other classes):
+${htmlClasses}
+
+Requirements:
+- CSS variables for colors (--primary-color, --background-color, etc.)
+- Dark theme: #0a0a0a background, white text, #0070f3 accent
+- Responsive: mobile-first with breakpoints at 768px and 480px
+- Flexbox/Grid layouts for cards
+- Smooth transitions and hover effects
+- 200+ lines. Every class from the HTML must have styles.`;
+
+      const cssContent = await callModel([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: cssPrompt },
+      ]);
+      if (cssContent.length > 50) {
+        allContents.push(cssContent);
+        onStreamUpdate(allContents.join('\n\n'), 'Generated CSS — creating JS...');
+      }
+    } catch {}
+
+    // Step 3: Generate JS — must reference HTML elements exactly
+    try {
+      const htmlElements = extractElementsFromHtml(allContents[0] || '');
+      const jsPrompt = `Create a COMPLETE script.js file. Use <write file="script.js"> tags.
+CRITICAL: Only reference elements that exist in the HTML:
+${htmlElements}
+
+Include:
+- Mobile nav toggle (use .nav-toggle and .nav-links classes)
+- Smooth scroll for anchor links
+- Scroll-to-top button visibility toggle (use .scroll-to-top class)
+- Scroll animations for feature cards (use .feature-card class)
+- 80+ lines. Only use selectors that match the HTML above.`;
+
+      const jsContent = await callModel([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: jsPrompt },
+      ]);
+      if (jsContent.length > 50) {
+        allContents.push(jsContent);
+        onStreamUpdate(allContents.join('\n\n'), 'Generated JS — checking quality...');
+      }
+    } catch {}
+
     content = allContents.join('\n\n');
   } else {
     // Single-request mode (for edits, simple requests, or when user provides <write> tags)
