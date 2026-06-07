@@ -78,6 +78,8 @@ Run terminal commands:
 4. When modifying a file, preserve ALL existing code that is not being changed.
 5. NEVER create duplicate files. If "index.html" exists and needs changes, UPDATE it — do not create "index2.html".
 6. Plan briefly (2-3 sentences) before writing code: what you'll build, which files, which approach.
+7. CSS/JS CONSISTENCY: Every CSS selector and JS querySelector MUST match the EXACT class names used in your HTML. Write the HTML first, then reference its exact classes in CSS and JS. Never invent class names that differ between files.
+8. Write CSS file with the EXACT selectors that match your HTML elements. Write JS that queries the EXACT elements from your HTML.
 
 ## WEBSITE & DESIGN STANDARDS
 When building websites or landing pages:
