@@ -71,7 +71,7 @@ async function readStream(response: Response): Promise<string> {
 }
 
 async function callModel(messages: ChatMessage[], opts?: { maxTokens?: number; temperature?: number }): Promise<string> {
-  // Try streaming first
+  // Try streaming first (Qwen via /api/chat which handles fallback)
   try {
     const response = await postChatCompletion({
       messages,
@@ -100,7 +100,7 @@ async function callModel(messages: ChatMessage[], opts?: { maxTokens?: number; t
     }
   } catch {}
 
-  throw new Error('API returned no content — Qwen may be temporarily unavailable');
+  throw new Error('API returned no content — model may be temporarily unavailable');
 }
 
 // ─── Quality Checker (local, no API call) ────────────────────────────────────

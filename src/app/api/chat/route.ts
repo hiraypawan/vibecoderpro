@@ -2,9 +2,10 @@ import { NextRequest } from 'next/server';
 
 const HYPERBOLIC_API_URL = 'https://api.hyperbolic.xyz/v1/chat/completions';
 const HYPERBOLIC_API_KEY = process.env.HYPERBOLIC_API_KEY!;
-const MODEL = 'Qwen/Qwen3-Coder-480B-A35B-Instruct';
+const PRIMARY_MODEL = 'Qwen/Qwen3-Coder-480B-A35B-Instruct';
+const FALLBACK_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
 
-async function callHyperbolic(body: any): Promise<Response> {
+async function callModel(model: string, body: any): Promise<Response> {
   return fetch(HYPERBOLIC_API_URL, {
     method: 'POST',
     headers: {
@@ -12,7 +13,7 @@ async function callHyperbolic(body: any): Promise<Response> {
       'Authorization': `Bearer ${HYPERBOLIC_API_KEY}`,
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       messages: body.messages,
       stream: body.stream !== undefined ? body.stream : true,
       temperature: body.temperature ?? 0.3,
@@ -26,7 +27,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const response = await callHyperbolic(body);
+    // Try Qwen first, fallback to Llama if 500
+    let response = await callModel(PRIMARY_MODEL, body);
+    let usedModel = PRIMARY_MODEL;
+
+    if ([500, 502, 503, 504].includes(response.status)) {
+      response = await callModel(FALLBACK_MODEL, body);
+      usedModel = FALLBACK_MODEL;
+    }
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
@@ -65,7 +73,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'X-Model-Used': MODEL,
+        'X-Model-Used': usedModel,
       },
     });
   } catch (error: any) {
