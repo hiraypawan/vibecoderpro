@@ -64,7 +64,7 @@ async function callModel(messages: ChatMessage[], opts?: { maxTokens?: number; t
 // ─── Quality Checker (local, no API call) ────────────────────────────────────
 
 export interface QualityIssue {
-  type: 'truncation' | 'placeholder' | 'syntax' | 'incomplete';
+  type: 'truncation' | 'placeholder' | 'syntax' | 'incomplete' | 'consistency';
   file: string;
   detail: string;
 }
@@ -105,6 +105,62 @@ export function checkLocalQuality(blocks: Array<{ type: string; path: string; co
       const braces = (c.match(/{/g) || []).length - (c.match(/}/g) || []).length;
       if (Math.abs(braces) > 1) {
         issues.push({ type: 'syntax', file: path, detail: `Unbalanced braces: ${braces > 0 ? '+' : ''}${braces}` });
+      }
+    }
+  }
+
+  // Cross-file consistency: HTML class names vs CSS selectors
+  const htmlBlocks = blocks.filter(b => b.type === 'write' && b.path.endsWith('.html'));
+  const cssBlocks = blocks.filter(b => b.type === 'write' && b.path.endsWith('.css'));
+  const jsBlocks = blocks.filter(b => b.type === 'write' && (b.path.endsWith('.js') || b.path.endsWith('.ts')));
+
+  for (const html of htmlBlocks) {
+    // Extract class names from HTML
+    const classNames = new Set<string>();
+    const classMatches = html.content.matchAll(/class=["']([^"']+)["']/g);
+    for (const m of classMatches) {
+      m[1].split(/\s+/).forEach(cls => {
+        if (cls.length > 1 && !cls.match(/^(fa[srb]?|fas|fab|active|visible|open|closed|hover|focus|hidden|show|hide|toggle|btn|link|text|font|d-none|d-flex|d-block|container|row|col)$/)) {
+          classNames.add(cls);
+        }
+      });
+    }
+
+    if (classNames.size < 3) continue; // Too few classes to validate
+
+    // Check CSS references at least some HTML classes
+    for (const css of cssBlocks) {
+      let matched = 0;
+      let checked = 0;
+      for (const cls of classNames) {
+        checked++;
+        if (css.content.includes(cls)) matched++;
+      }
+      const matchRate = checked > 0 ? matched / checked : 0;
+      if (matchRate < 0.3 && checked >= 5) {
+        issues.push({
+          type: 'consistency',
+          file: css.path,
+          detail: `CSS only references ${Math.round(matchRate * 100)}% of HTML class names (${matched}/${checked}). Selectors likely mismatch HTML.`,
+        });
+      }
+    }
+
+    // Check JS references at least some HTML classes
+    for (const js of jsBlocks) {
+      let matched = 0;
+      let checked = 0;
+      for (const cls of classNames) {
+        checked++;
+        if (js.content.includes(cls)) matched++;
+      }
+      const matchRate = checked > 0 ? matched / checked : 0;
+      if (matchRate < 0.2 && checked >= 5) {
+        issues.push({
+          type: 'consistency',
+          file: js.path,
+          detail: `JS only references ${Math.round(matchRate * 100)}% of HTML class names (${matched}/${checked}). querySelector calls likely crash.`,
+        });
       }
     }
   }
