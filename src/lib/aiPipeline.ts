@@ -197,6 +197,9 @@ export interface PipelineResult {
 
 const COMPLEXITY_KEYWORDS = /\b(build|create|make|design|full|complete|app|website|dashboard|game|system|project|multi|complex)\b/i;
 
+// Detect when user wants multiple files (landing page, app, etc.)
+const MULTI_FILE_KEYWORDS = /\b(landing page|website|app|dashboard|portfolio|blog|store|shop|forum|chat|game|calculator|weather|todo|notes|resume|agency|saas)\b/i;
+
 export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<PipelineResult> {
   const { systemPrompt, fileContext, history, userMessage, existingFiles, onStreamUpdate, onPhaseChange } = opts;
   const isComplex = COMPLEXITY_KEYWORDS.test(userMessage);
@@ -224,18 +227,56 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
 
   // ─── Phase 2: Coding ───
   onPhaseChange('coding');
-  const codingMessages: ChatMessage[] = [{ role: 'system', content: systemPrompt }];
+  
+  // Multi-file strategy: generate each file separately for better quality
+  const isMultiFile = MULTI_FILE_KEYWORDS.test(userMessage) && !userMessage.includes('<write') && !userMessage.includes('```');
+  
+  let content = '';
+  
+  if (isMultiFile) {
+    // Generate files one at a time — each gets full output capacity
+    const fileSpecs = [
+      { ext: 'html', prompt: `Create a COMPLETE index.html file for this request. Use <write file="index.html"> tags. Include ALL sections with REAL content — no placeholders. 200+ lines.` },
+      { ext: 'css', prompt: `Create a COMPLETE styles.css file for this request. Use <write file="styles.css"> tags. Include ALL styles with CSS variables, responsive design, dark theme. 200+ lines.` },
+      { ext: 'js', prompt: `Create a COMPLETE script.js file for this request. Use <write file="script.js"> tags. Include ALL interactivity — mobile menu, smooth scroll, animations. 80+ lines.` },
+    ];
+    
+    const allContents: string[] = [];
+    
+    for (const spec of fileSpecs) {
+      try {
+        const fileMessages: ChatMessage[] = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `${userMessage}\n\n${spec.prompt}` },
+        ];
+        
+        const fileContent = await callModel(fileMessages);
+        if (fileContent.length > 50) {
+          allContents.push(fileContent);
+          onStreamUpdate(allContents.join('\n\n'), `Generated ${spec.ext}...`);
+        }
+      } catch {
+        // If one file fails, continue with others
+      }
+    }
+    
+    content = allContents.join('\n\n');
+  } else {
+    // Single-request mode (for edits, simple requests, or when user provides <write> tags)
+    const codingMessages: ChatMessage[] = [{ role: 'system', content: systemPrompt }];
 
-  // Inject plan as context if available
-  if (plan) {
-    codingMessages.push({ role: 'system', content: `IMPLEMENTATION PLAN (follow this):\n${plan}` });
+    // Inject plan as context if available
+    if (plan) {
+      codingMessages.push({ role: 'system', content: `IMPLEMENTATION PLAN (follow this):\n${plan}` });
+    }
+
+    if (fileContext) codingMessages.push(fileContext);
+    codingMessages.push(...history);
+    codingMessages.push({ role: 'user', content: userMessage });
+
+    content = await callModel(codingMessages);
   }
-
-  if (fileContext) codingMessages.push(fileContext);
-  codingMessages.push(...history);
-  codingMessages.push({ role: 'user', content: userMessage });
-
-  let content = await callModel(codingMessages);
+  
   onStreamUpdate(content, 'Code generated — checking quality...');
 
   // ─── Phase 3: Local Quality Check ───
@@ -264,8 +305,6 @@ Output the COMPLETE files. Do NOT truncate. Do NOT use placeholders.`;
 
     const fixMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      ...codingMessages.slice(1), // include plan + file context + history
-      { role: 'assistant', content },
       { role: 'user', content: fixPrompt },
     ];
 
