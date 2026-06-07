@@ -1,4 +1,5 @@
 import { ChatMessage, postChatCompletion } from './api';
+import { pickTheme, themeToPromptBlock, DesignTheme } from './designThemes';
 
 // ─── Agent Roles ─────────────────────────────────────────────────────────────
 
@@ -406,44 +407,45 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
   
   if (isMultiFile) {
     // Generate files one at a time — each gets full output capacity
-    // CRITICAL: CSS and JS must use the EXACT classes/IDs from the HTML
+    // Pick a random theme to make each output feel genuinely different
+    const theme: DesignTheme = pickTheme(userMessage);
+    onStreamUpdate('', `🎨 Theme: ${theme.name}`);
+
+    const themeBlock = themeToPromptBlock(theme);
     const allContents: string[] = [];
-    
+
     // Step 1: Generate HTML first
     try {
       const htmlPrompt = `Create a COMPLETE index.html file for this request. Use <write file="index.html"> tags. Output 250+ lines.
 
-MANDATORY SECTIONS (use REAL product names, prices, descriptions — never "Lorem ipsum" or "Feature 1"):
-1. <nav class="navbar"> with logo, 3-4 nav links, and a CTA button (.btn-nav). Include hamburger <button class="nav-toggle"> for mobile.
-2. <section class="hero"> with .hero-badge, .hero-headline (h1), .hero-subtitle (p), .hero-actions (primary + secondary buttons), and .hero-stats (3 stat cards).
-3. <section id="features" class="features"> with .section-badge, .section-title, .section-subtitle, and .features-grid containing 6 .feature-card items — each with .feature-icon (Font Awesome), h3, p.
-4. <section id="pricing" class="pricing"> with .pricing-grid containing 3 .pricing-card items (Starter $0, Pro $19, Enterprise Custom). Middle one has class "featured" and a .popular-badge. Each card has h3, .price, .price-desc, .pricing-features (ul of 4-5 features with <i class="fas fa-check">), and a CTA link.
-5. <section id="testimonials" class="testimonials"> with 2 .testimonial-card items — each with 5-star .stars, p quote, .testimonial-author (avatar + name + role).
-6. <section id="cta" class="cta-section"> with h2, p, and a .btn-primary .btn-large.
-7. <footer class="footer"> with .footer-grid (4 columns: brand+desc, Product links, Company links, Legal links), .footer-bottom (copyright + .social-links with GitHub/Twitter/Discord icons).
-8. <button class="scroll-to-top" aria-label="Scroll to top"> at the end of body.
+${themeBlock}
 
-HEAD requirements:
-- <meta charset="UTF-8">, <meta name="viewport">, <meta name="description"> (real SEO description, not generic), <title> with the product name
-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"> (Font Awesome CDN)
+You have full creative freedom to design the sections, layout, and naming. The theme above dictates the look. Make it feel like a real product from a company that lives this aesthetic.
+
+MANDATORY CONTENT (use REAL product names, prices, descriptions, names — never "Lorem ipsum", "Feature 1", "Product A"):
+- A navigation (style it to fit the theme — could be top bar, side rail, or minimal)
+- A hero/above-the-fold with a strong headline, supporting copy, and a primary call-to-action
+- 2-4 content sections (could be features, showcase, how-it-works, stats, testimonials, integrations, etc. — pick what makes sense for the product)
+- A pricing/tiers section IF appropriate for the product type (otherwise skip or replace with something more relevant)
+- A footer with copyright, contact links, social links
+- Realistic copy throughout — product names, real-sounding company names for testimonials, real feature names
+
+HEAD REQUIREMENTS:
+- <meta charset="UTF-8">, <meta name="viewport" content="width=device-width, initial-scale=1.0">
+- <meta name="description" content="..."> with a real SEO description (1-2 sentences)
+- <title> with the product name
+- Google Fonts link: <link rel="stylesheet" href="${theme.fonts.googleFontsUrl}">
 - <link rel="stylesheet" href="styles.css">
-- <script src="script.js"></script> at the end of body
-- Every <section> must have an id for anchor navigation.
+- Icon library CDN if the theme uses icons (e.g., Font Awesome) — otherwise use SVG inline or skip icons
+- <script src="script.js"></script> at end of body
 
-Use these CSS class names EXACTLY (CSS and JS will reference them):
-.navbar .nav-container .nav-logo .nav-toggle .nav-links .btn-nav
-.hero .hero-container .hero-badge .hero-headline .hero-subtitle .hero-actions .hero-stats .stat .stat-number .stat-label
-.btn-primary .btn-secondary .btn-outline .btn-large
-.gradient-text
-.section-badge .section-title .section-subtitle .container
-.features .features-grid .feature-card .feature-icon
-.pricing .pricing-grid .pricing-card .pricing-card.featured .popular-badge .price .price-desc .pricing-features
-.testimonials .testimonials-grid .testimonial-card .stars .testimonial-author .avatar
-.cta-section
-.footer .footer-grid .footer-brand .footer-col .footer-bottom .social-links
-.scroll-to-top
+You decide:
+- The exact CSS class names (use semantic names that fit the theme, e.g. .crt-frame for terminal, .neon-glow for cyberpunk, .brutal-block for brutalist)
+- Whether to use Font Awesome, Lucide, or no icons
+- The section structure (don't blindly copy a "hero/features/pricing/testimonials" template — pick what serves the product)
+- The number of nav links, their labels, their targets
 
-Output ONLY the <write> tag. No markdown, no commentary, no preamble.`;
+Output ONLY the <write> tag. No markdown, no commentary, no preamble, no explanations.`;
 
       const htmlContent = await generateWithContinuation(
         [
@@ -462,53 +464,28 @@ Output ONLY the <write> tag. No markdown, no commentary, no preamble.`;
     // Step 2: Generate CSS — must match HTML classes exactly
     try {
       const htmlClasses = extractClassesFromHtml(allContents[0] || '');
-      const cssPrompt = `Create a COMPLETE styles.css file. Use <write file="styles.css"> tags. Output 350+ lines.
+      const cssPrompt = `Create a COMPLETE styles.css file for the index.html above. Use <write file="styles.css"> tags. Output 350+ lines.
 
-CRITICAL: Style EXACTLY these classes and IDs from the HTML (do not invent new ones):
+${themeBlock}
+
+CRITICAL: Style EXACTLY these classes and IDs from the HTML (do not invent new ones, do not skip any):
 ${htmlClasses}
-
-DESIGN SYSTEM (use CSS variables at the top):
-:root {
-  --primary-color: #0070f3;
-  --background-color: #0a0a0a;
-  --card-bg: #111111;
-  --card-border: #1a1a1a;
-  --text-color: #ffffff;
-  --text-muted: #cccccc;
-  --border-color: #333333;
-  --gradient-end: #00bfff;
-}
 
 REQUIREMENTS:
 - Universal reset (* { margin: 0; padding: 0; box-sizing: border-box; })
-- body: font-family: 'Inter', -apple-system, sans-serif; background: var(--background-color); color: var(--text-color); line-height: 1.7
-- .container: width: 90%; max-width: 1200px; margin: 0 auto; padding: 4rem 0
-- .section-title: font-size: clamp(2rem, 4vw, 3rem); line-height: 1.2; margin-bottom: 1rem
-- .gradient-text: background: linear-gradient(90deg, var(--primary-color), var(--gradient-end)); -webkit-background-clip: text; -webkit-text-fill-color: transparent
-- Buttons (.btn-primary .btn-secondary .btn-outline): padding 1rem 2.5rem; border-radius 30px; transition: all 0.3s ease; cursor pointer
-- .btn-primary: background linear-gradient(90deg, primary, gradient-end); color white; box-shadow 0 4px 15px rgba(0,112,243,0.2); :hover { transform: translateY(-4px); box-shadow glow }
-- Cards (.feature-card, .pricing-card, .testimonial-card): background var(--card-border); border 1px solid var(--border-color); border-radius 12px; padding 2rem; :hover { transform: translateY(-8px); box-shadow glow }
-- .pricing-card.featured: transform: scale(1.05); border-color: var(--primary-color); box-shadow: 0 0 30px rgba(0,112,243,0.3)
-- .popular-badge: position absolute; top -15px; left 50%; transform translateX(-50%); background var(--primary-color); color white; padding 0.3rem 1rem; border-radius 20px
-- Grids (.features-grid, .pricing-grid, .testimonials-grid): display grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem
-- .navbar: position sticky; top 0; z-index 100; background rgba(10,10,10,0.8); backdrop-filter: blur(10px); display flex; justify-content space-between
-- .nav-toggle: display none (shown on mobile via @media)
-- .hero: min-height 80vh; display flex; align-items center; text-align center; background linear-gradient(180deg, var(--background-color), var(--gradient-end))
-- .stat-number: font-size 2rem; font-weight 700
-- .footer: background #111; border-top 1px solid var(--border-color); padding 4rem 0 2rem
-- .footer-grid: display grid; grid-template-columns: repeat(4, 1fr); gap 2rem
-- .scroll-to-top: position fixed; bottom 30px; right 30px; background var(--primary-color); width 50px; height 50px; border-radius 50%; display none
-- .scroll-to-top.visible: display block; opacity 1
-- Animations: hover transitions 0.3s ease, transform translateY(-4px to -8px) on card hover
-- .stars: color var(--gradient-end); margin-bottom 1rem
-- .avatar: width 50px; height 50px; border-radius 50%; background var(--primary-color); display flex; align-items center; justify-content center; font-weight 600
+- :root CSS variables from the palette above (use the variable names from the theme spec)
+- body uses the theme's body font and bg color
+- A 1100-1200px max-width container utility class
+- Every section has generous padding (4-6rem top/bottom)
+- Responsive: at least 2 breakpoints (tablet 768px, mobile 480px) — at mobile, nav links should be hidden behind a toggle, grids should collapse to 1 column
+- Implement the MOTIFS listed in the theme (e.g., offset shadow for brutalist, backdrop-blur for glass, scan lines for cyberpunk)
+- Implement the MOTION rules from the theme (snappy vs bouncy vs slow)
+- Honor the LAYOUT RULES from the theme
+- Honor "DO NOT USE" from the theme (don't introduce things the theme forbids)
 
-RESPONSIVE (mobile-first):
-@media (max-width: 992px) { grids → 2 columns; .pricing-card.featured { transform: none; } }
-@media (max-width: 768px) { .nav-links { display: none; } .nav-toggle { display: block; } .features-grid, .pricing-grid, .testimonials-grid { grid-template-columns: 1fr; } .footer-grid { grid-template-columns: repeat(2,1fr); } }
-@media (max-width: 480px) { .hero h1 { font-size: 2.2rem; } .footer-grid { grid-template-columns: 1fr; } }
+Use the theme's exact font names in font-family. Load the Google Fonts URL in HTML (already done). Use the palette colors via CSS variables.
 
-Output ONLY the <write> tag. No markdown, no commentary, no preamble. Every class from the HTML must have styles.`;
+Output ONLY the <write> tag. No markdown, no commentary. Every class from the HTML must have styles.`;
 
       const cssContent = await generateWithContinuation(
         [
@@ -527,23 +504,26 @@ Output ONLY the <write> tag. No markdown, no commentary, no preamble. Every clas
     // Step 3: Generate JS — must reference HTML elements exactly
     try {
       const htmlElements = extractElementsFromHtml(allContents[0] || '');
-      const jsPrompt = `Create a COMPLETE script.js file. Use <write file="script.js"> tags. Output 100+ lines.
+      const jsPrompt = `Create a COMPLETE script.js file for the index.html above. Use <write file="script.js"> tags. Output 100+ lines.
 
-CRITICAL: Only reference elements that exist in the HTML:
+${themeBlock}
+
+CRITICAL: Only reference elements that exist in the HTML (use the selectors extracted below — match them exactly):
 ${htmlElements}
 
-INCLUDE ALL OF THESE (vanilla JS, no libraries):
-1. MOBILE NAV TOGGLE: Click .nav-toggle to toggle 'nav-open' class on .nav-links. Close menu when a link is clicked. Hide toggle if screen width > 768px on resize.
-2. SMOOTH SCROLL: All anchor links (a[href^="#"]) scroll smoothly to target section. Account for sticky navbar height (~80px) using scroll-margin-top or offset calculation.
-3. SCROLL-TO-TOP: Show .scroll-to-top button (add 'visible' class) when window.scrollY > 300. Click scrolls smoothly to top. Hide when scrolled back to top.
-4. SCROLL ANIMATIONS: Use IntersectionObserver to add 'visible' class to .feature-card, .pricing-card, .testimonial-card when they enter viewport. Use unobserve after triggering. Add a fadeInUp keyframe (opacity 0 → 1, translateY 30px → 0) over 0.6s ease-out.
-5. NAVBAR BACKGROUND: Add 'scrolled' class to .navbar (or .page-header) when window.scrollY > 50, removing when back at top. CSS variable transition: background-color 0.3s ease.
-6. STAT COUNTER ANIMATION: Animate .stat-number from 0 to its final value over 2 seconds when in viewport (use requestAnimationFrame, easeOutCubic easing). Parse the value (handle '50K+', '99.9%', '4.9/5' formats).
-7. ACTIVE NAV LINK HIGHLIGHT: Use IntersectionObserver to track which section is currently in view and add 'active' class to corresponding .nav-links a. Remove from others.
+INCLUDE THESE (adapt to the theme's MOTION style — snappy vs bouncy vs slow):
+1. Mobile nav toggle (whatever selectors match the nav pattern in the HTML)
+2. Smooth scroll for all internal anchor links
+3. Show/hide a "back to top" or scroll-to-top button if one exists
+4. Scroll-triggered animations using IntersectionObserver — add an 'in-view' or 'visible' class when elements enter viewport
+5. Nav background change on scroll if there's a sticky nav
+6. Any other interactive features appropriate to the theme (e.g., typed-out text for terminal, parallax for editorial, etc.)
+7. Form validation if there's a form
+8. Active section highlighting in nav
 
-DOMContentLoaded wrapper around all code. Add event listeners (not inline onclick). Use const/let (no var). Add a small console.log('Vibe Coder Pro loaded') at the end.
+DOMContentLoaded wrapper. Use const/let (no var). Use addEventListener (no inline onclick). End with console.log('Loaded').
 
-Output ONLY the <write> tag. No markdown, no commentary, no preamble.`;
+Output ONLY the <write> tag. No markdown, no commentary.`;
 
       const jsContent = await generateWithContinuation(
         [
