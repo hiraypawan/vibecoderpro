@@ -250,7 +250,17 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
     onPhaseChange('fixing');
     onStreamUpdate(content, `Found ${issues.length} issue(s) — auto-fixing (attempt ${retryCount})...`);
 
-    const fixPrompt = `The previous response had these quality issues:\n${issues.map((i: QualityIssue) => `- ${i.file}: ${i.detail} (${i.type})`).join('\n')}\n\nPlease fix ALL issues and output the COMPLETE corrected files. Do NOT truncate or use placeholders.`;
+    const fixPrompt = `URGENT: The previous response produced INCOMPLETE files. The AI stopped generating code too early.
+
+Issues found:
+${issues.map((i: QualityIssue) => `- ${i.file}: ${i.detail} (${i.type})`).join('\n')}
+
+You MUST now output the COMPLETE files using <write> tags. Requirements:
+- index.html: Must include FULL <!DOCTYPE html>, complete <head> with all meta tags, complete <body> with hero section (headline + subtitle + CTA button), features section (6+ feature cards with icons), pricing section (3 pricing tiers with features list), footer (links + copyright). Every section must have real content, not placeholders.
+- styles.css: Must include ALL styles — reset, typography, layout grid, responsive breakpoints (mobile/tablet/desktop), color variables, animations, component styles for every section. 300+ lines minimum.
+- script.js: Must include ALL interactivity — mobile menu toggle, smooth scroll, pricing toggle, form validation, animations. 100+ lines minimum.
+
+Output the COMPLETE files. Do NOT truncate. Do NOT use placeholders.`;
 
     const fixMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },

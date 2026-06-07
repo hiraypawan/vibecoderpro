@@ -120,36 +120,10 @@ function validateEdit(content: string, search: string, replace: string): { valid
   return { valid: true };
 }
 
-// Check if file content appears complete
+// Check if file content appears complete — ALWAYS returns true (accept all files)
+// We prefer partial files over no files. Quality check handles truncation detection.
 function isFileComplete(path: string, content: string): boolean {
   if (!content || content.length === 0) return false;
-  
-  const ext = path.split('.').pop()?.toLowerCase() || '';
-  
-  // Check HTML files have closing tags
-  if (ext === 'html' || ext === 'htm') {
-    const hasClosingHtml = content.includes('</html>');
-    const hasClosingBody = content.includes('</body>');
-    // Lenient: at least one major closing tag present, or file is substantial
-    if (!hasClosingHtml && !hasClosingBody && content.length < 200) return false;
-  }
-  
-  // Check CSS files have balanced braces
-  if (ext === 'css') {
-    const openBraces = (content.match(/{/g) || []).length;
-    const closeBraces = (content.match(/}/g) || []).length;
-    // Allow up to 5 unbalanced braces for partial content
-    if (Math.abs(openBraces - closeBraces) > 5) return false;
-  }
-  
-  // Check JS/TS files have balanced braces
-  if (ext === 'js' || ext === 'javascript' || ext === 'jsx' || ext === 'tsx' || ext === 'ts') {
-    const openBraces = (content.match(/{/g) || []).length;
-    const closeBraces = (content.match(/}/g) || []).length;
-    // Allow up to 5 unbalanced braces
-    if (Math.abs(openBraces - closeBraces) > 5) return false;
-  }
-  
   return true;
 }
 
@@ -157,12 +131,25 @@ export function parseToolBlocks(text: string, existingPaths?: Set<string>): Tool
   const blocks: ToolBlock[] = [];
   const paths = existingPaths || new Set<string>();
 
+  // 0. Pre-process: extract <write> tags from inside markdown code blocks
+  // Some models wrap <write> in ```html ... ``` which breaks the regex
+  let cleanedText = text;
+  const MD_WRAPPED_WRITE = /```(?:html|xml|text)?\s*\n([\s\S]*?)```/g;
+  for (const mdMatch of text.matchAll(MD_WRAPPED_WRITE)) {
+    const inner = mdMatch[1];
+    if (inner.includes('<write') && inner.includes('</write>')) {
+      // Replace the markdown block with just the inner content
+      cleanedText = cleanedText.replace(mdMatch[0], inner);
+    }
+  }
+
   // 1. Parse explicit <write> tags
-  for (const match of text.matchAll(WRITE_PATTERN)) {
+  for (const match of cleanedText.matchAll(WRITE_PATTERN)) {
     const path = match[1];
     const content = match[2].trim();
-    // Validate write content is complete and not truncated
-    if (content.length > 0 && !content.endsWith('...') && isFileComplete(path, content)) {
+    // Accept any content > 0 chars — even partial files are better than nothing
+    // Minimum 20 chars to avoid empty/near-empty stubs
+    if (content.length >= 20 && !content.endsWith('...')) {
       blocks.push({ type: 'write', path, content });
       paths.add(path);
     }
@@ -185,7 +172,7 @@ export function parseToolBlocks(text: string, existingPaths?: Set<string>): Tool
     } else {
       // AI put full content inside <edit> without <search>/<replace> — treat as write
       const content = inner.trim();
-      if (content.length > 0 && !content.endsWith('...') && isFileComplete(match[1], content)) {
+      if (content.length >= 20 && !content.endsWith('...')) {
         blocks.push({ type: 'write', path: match[1], content });
         paths.add(match[1]);
       }
@@ -206,10 +193,11 @@ export function parseToolBlocks(text: string, existingPaths?: Set<string>): Tool
   const hasExplicitWrites = blocks.some((b) => b.type === 'write');
   if (!hasExplicitWrites) {
     let blockIndex = 0;
-    for (const match of text.matchAll(MD_CODE_BLOCK)) {
+    // Use the cleaned text (after unwrapping markdown)
+    for (const match of cleanedText.matchAll(MD_CODE_BLOCK)) {
       const lang = (match[1] || '').toLowerCase();
       const code = match[2].trim();
-      if (!lang || !code || code.length < 10) continue;
+      if (!lang || !code || code.length < 50) continue;
       if (['json', 'yaml', 'yml', 'toml'].includes(lang)) continue;
       // Skip truncated code
       if (code.endsWith('...') || code.endsWith('// rest')) continue;
