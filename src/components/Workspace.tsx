@@ -316,6 +316,15 @@ export default function Workspace() {
   }, [addLog, openFiles, showPreview, trackFileCreated, forceRender]);
 
   const handleSend = useCallback(async (userMessage: string) => {
+    // Enforce prompt limit for anonymous users
+    if (!isSignedIn) {
+      const allowed = await trackPrompt();
+      if (!allowed) {
+        addLog('warn', 'Free prompt limit reached. Sign in with Google for unlimited.');
+        return;
+      }
+    }
+
     // Track achievement
     trackAchievementPrompt();
 
@@ -506,7 +515,7 @@ export default function Workspace() {
         } catch {}
       }
     }
-  }, [messages, applyToolBlocks, addLog, isSignedIn, trackAchievementPrompt, currentProjectId, saveFilesToLocal]);
+  }, [messages, applyToolBlocks, addLog, isSignedIn, trackPrompt, trackAchievementPrompt, currentProjectId, saveFilesToLocal]);
 
   const handleAiAction = useCallback((action: string) => {
     const code = selectedCode || (activeFile ? filesRef.current.get(activeFile)?.substring(0, 2000) : '') || '';

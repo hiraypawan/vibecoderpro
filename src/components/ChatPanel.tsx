@@ -114,10 +114,10 @@ export default function ChatPanel({ messages, onSend, isStreaming, activeTasks, 
         {promptLimit && !promptLimit.isSignedIn && (
           <div className="flex items-center gap-1.5">
             <span className="text-[9px] px-1.5 py-0.5 rounded" style={{
-              background: 'rgba(63,185,80,0.15)',
-              color: 'var(--accent-green)',
+              background: promptLimit.isLimited ? 'rgba(248,81,73,0.15)' : 'rgba(63,185,80,0.15)',
+              color: promptLimit.isLimited ? 'var(--accent-red)' : 'var(--accent-green)',
             }}>
-              Unlimited
+              {promptLimit.isLimited ? 'Limit reached' : `${promptLimit.remaining} left`}
             </span>
           </div>
         )}

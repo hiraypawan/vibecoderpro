@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 
-const ANONYMOUS_LIMIT = Infinity;
+const ANONYMOUS_LIMIT = 5;
 const STORAGE_KEY = 'vibe_prompt_count';
 const STORAGE_DATE_KEY = 'vibe_prompt_date';
 
