@@ -100,26 +100,7 @@ async function callModel(messages: ChatMessage[], opts?: { maxTokens?: number; t
     }
   } catch {}
 
-  // Final fallback: try non-streaming with explicit model override
-  const fallbackModels = ['meta-llama/Llama-3.3-70B-Instruct', 'deepseek-ai/DeepSeek-V3-0324'];
-  for (const model of fallbackModels) {
-    try {
-      const response = await postChatCompletion({
-        messages,
-        model,
-        stream: false,
-        max_tokens: opts?.maxTokens ?? 65536,
-        temperature: opts?.temperature ?? 0.3,
-      }, 'pipeline');
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
-        if (content.length > 0) return content;
-      }
-    } catch {}
-  }
-
-  throw new Error('All models failed — no content returned');
+  throw new Error('API returned no content — Qwen may be temporarily unavailable');
 }
 
 // ─── Quality Checker (local, no API call) ────────────────────────────────────
@@ -338,7 +319,7 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
       if (fileContext) planMessages.push(fileContext);
       planMessages.push({ role: 'user', content: userMessage });
 
-      plan = await callModel(planMessages, { maxTokens: 1024, temperature: 0.2 });
+      plan = await callModel(planMessages, { maxTokens: 1024, temperature: 0.3 });
       onStreamUpdate(plan, 'Planning complete — generating code...');
     } catch (e: any) {
       // Planning failure is non-fatal — proceed without plan
