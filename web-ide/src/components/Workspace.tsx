@@ -43,6 +43,16 @@ interface LogEntry {
   timestamp: number;
 }
 
+const PLANNER_PROMPT = `You are a senior software architect. Given a user request and workspace context, output a BRIEF implementation plan.
+Format:
+- GOAL: one sentence describing what to build
+- FILES: list each file with one-line description of what goes in it
+- APPROACH: 2-3 sentences on architecture, layout structure, key features
+- DESIGN: color scheme, typography, visual style recommendations
+- RISKS: potential issues to watch for
+
+Be specific. Reference exact filenames. No code — just the plan. Keep it under 250 words.`;
+
 const SYSTEM_PROMPT = `You are an expert AI software engineer inside Vibe Coder Pro, a cloud IDE.
 Your job: produce COMPLETE, WORKING, PRODUCTION-QUALITY code on the first attempt.
 
@@ -69,13 +79,28 @@ Run terminal commands:
 5. NEVER create duplicate files. If "index.html" exists and needs changes, UPDATE it — do not create "index2.html".
 6. Plan briefly (2-3 sentences) before writing code: what you'll build, which files, which approach.
 
-## CODE QUALITY
-- Semantic HTML, responsive CSS (mobile-first), modern ES6+ JavaScript
-- Proper error handling, accessible markup, smooth transitions
-- Include all meta tags, imports, and dependencies — nothing missing
-- For websites: always create index.html + styles.css + script.js minimum
-- Use ONLY free APIs that need no signup (wttr.in, JSONPlaceholder, DummyJSON, randomuser.me)
+## WEBSITE & DESIGN STANDARDS
+When building websites or landing pages:
+- Modern, visually stunning design — dark themes with gradient accents preferred
+- Fully responsive (mobile-first approach)
+- Smooth animations and transitions (CSS transforms, keyframes)
+- Professional typography with Google Fonts (Inter, Poppins, Space Grotesk)
+- Hero section with compelling headline, subtext, and CTA button
+- Well-structured sections: hero, features, testimonials, pricing, footer
+- CSS Grid or Flexbox for layouts — never tables
+- Subtle hover effects, scroll animations, glass-morphism elements
+- Proper meta tags, Open Graph tags, viewport meta
+- All CSS in a separate styles.css file, all JS in script.js
+- Use ONLY free APIs that need no signup (wttr.in, JSONPlaceholder, DummyJSON, randomuser.me, unsplash for images)
 - NEVER ask the user for API keys or to configure anything — provide working code out of the box
+- Include favicon, loading states, smooth scroll behavior
+
+## CODE QUALITY
+- Semantic HTML5, modern ES6+ JavaScript, clean CSS3
+- Proper error handling, try/catch blocks, null checks
+- Accessible markup (ARIA labels, alt text, keyboard navigation)
+- Include all meta tags, imports, and dependencies — nothing missing
+- Comment complex logic sections
 
 ## BEHAVIOR
 - Be direct and technical. No fluff, no excessive praise.
@@ -426,12 +451,53 @@ export default function Workspace() {
       // Build messages for API call
       const systemMsg: ChatMessage = { role: 'system', content: SYSTEM_PROMPT };
       const messagesToSend: ChatMessage[] = [systemMsg];
+
+      // Phase 0: Planning step for complex requests
+      const isComplexRequest = /\b(build|create|make|design|full|complete|app|website|landing|page|dashboard|game|system|project|multi|complex)\b/i.test(userMessage);
+      if (isComplexRequest) {
+        setAiTask('Planning architecture...');
+        addLog('system', 'Complex request detected — running planning phase');
+        try {
+          const planMessages: ChatMessage[] = [{ role: 'system', content: PLANNER_PROMPT }];
+          if (fileContextMsg) planMessages.push(fileContextMsg);
+          planMessages.push(...compactedHistory);
+          planMessages.push({ role: 'user', content: userMessage });
+
+          const planResponse = await postChatCompletion({ messages: planMessages, max_tokens: 1024, temperature: 0.2 }, 'local-session');
+          if (planResponse.ok && planResponse.body) {
+            const planReader = planResponse.body.getReader();
+            const planDecoder = new TextDecoder();
+            let planContent = '';
+            let planBuffer = '';
+            while (true) {
+              const { done, value } = await planReader.read();
+              if (done) break;
+              planBuffer += planDecoder.decode(value, { stream: true });
+              const planLines = planBuffer.split('\n');
+              planBuffer = planLines.pop() || '';
+              for (const line of planLines) {
+                const t = line.trim();
+                if (!t.startsWith('data:') || t === 'data: [DONE]') continue;
+                try { planContent += JSON.parse(t.slice(5)).choices?.[0]?.delta?.content || ''; } catch {}
+              }
+            }
+            if (planContent.trim()) {
+              messagesToSend.push({ role: 'system', content: `IMPLEMENTATION PLAN (follow this closely):\n${planContent}` });
+              addLog('info', 'Plan generated successfully');
+            }
+          }
+        } catch (planErr: any) {
+          addLog('warn', `Planning failed (non-fatal): ${planErr.message}`);
+          // Continue without plan — not fatal
+        }
+      }
+
       if (fileContextMsg) messagesToSend.push(fileContextMsg);
       messagesToSend.push(...compactedHistory);
       messagesToSend.push({ role: 'user', content: userMessage });
 
       // Phase 1: Stream response in real-time
-      setAiTask('Generating response...');
+      setAiTask(isComplexRequest ? 'Generating code from plan...' : 'Generating response...');
       const response = await postChatCompletion({ messages: messagesToSend }, 'local-session');
       if (!response.ok) { const e = await response.text().catch(() => ''); throw new Error(`API ${response.status}: ${e.substring(0, 200)}`); }
       const reader = response.body?.getReader();
