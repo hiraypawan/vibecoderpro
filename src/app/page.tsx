@@ -1,26 +1,28 @@
 'use client';
 
-export default function Home() {
-  return (
-    <div
-      className="h-screen flex items-center justify-center"
-      style={{ background: '#0a0a0a', color: '#fff' }}
-    >
-      <div className="text-center max-w-md px-6">
+import dynamic from 'next/dynamic';
+
+const Workspace = dynamic(() => import('@/components/Workspace'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-screen flex items-center justify-center" style={{ background: '#0a0a0a' }}>
+      <div className="text-center">
         <div
-          className="text-5xl font-bold mb-4"
+          className="text-3xl font-bold mb-2"
           style={{
             background: 'linear-gradient(90deg, #0070f3, #00bfff)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
           }}
         >
-          Vibe Coder Pro
+          VIBE
         </div>
-        <div className="text-sm" style={{ color: '#888' }}>
-          The AI workspace is being rebuilt. Check back soon.
-        </div>
+        <div className="text-xs" style={{ color: '#888' }}>Loading workspace...</div>
       </div>
     </div>
-  );
+  ),
+});
+
+export default function Home() {
+  return <Workspace />;
 }
