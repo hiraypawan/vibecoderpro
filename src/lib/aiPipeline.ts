@@ -24,6 +24,64 @@ Output ONLY:
 
 Be strict but fair. Only flag real problems.`;
 
+// ─── Truncation Detection ─────────────────────────────────────────────────────
+// Detects when the model's output got cut off mid-content. Critical because
+// Llama 3.3 70B has an effective ~4800 char output cap that silently truncates.
+
+function looksTruncated(content: string, kind: 'html' | 'css' | 'js'): { truncated: boolean; reason: string } {
+  const trimmed = content.trim();
+  if (kind === 'html') {
+    if (!trimmed.includes('</html>')) return { truncated: true, reason: 'missing </html> closing tag' };
+    if (!trimmed.includes('</body>')) return { truncated: true, reason: 'missing </body> closing tag' };
+    if (trimmed.length < 1200) return { truncated: true, reason: `HTML only ${trimmed.length} chars — too short for a real page` };
+  }
+  if (kind === 'css') {
+    const open = (trimmed.match(/{/g) || []).length;
+    const close = (trimmed.match(/}/g) || []).length;
+    if (open > close) return { truncated: true, reason: `unbalanced CSS braces (${open} open, ${close} close)` };
+    if (trimmed.length < 600) return { truncated: true, reason: `CSS only ${trimmed.length} chars — too short` };
+  }
+  if (kind === 'js') {
+    const open = (trimmed.match(/{/g) || []).length;
+    const close = (trimmed.match(/}/g) || []).length;
+    if (open > close) return { truncated: true, reason: `unbalanced JS braces (${open} open, ${close} close)` };
+    if (trimmed.length < 250) return { truncated: true, reason: `JS only ${trimmed.length} chars — too short` };
+  }
+  return { truncated: false, reason: '' };
+}
+
+async function generateWithContinuation(
+  messages: ChatMessage[],
+  kind: 'html' | 'css' | 'js',
+  onUpdate: (text: string) => void
+): Promise<string> {
+  let content = await callModel(messages);
+  onUpdate(content);
+
+  // Auto-continue up to 2 times if the file looks truncated
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const check = looksTruncated(content, kind);
+    if (!check.truncated) break;
+
+    try {
+      const continuation = await callModel([
+        ...messages,
+        { role: 'assistant', content: content },
+        { role: 'user', content: `The file is INCOMPLETE (${check.reason}). Output ONLY the missing tail of the ${kind.toUpperCase()} file — start EXACTLY where you stopped, no preamble, no repetition, just the remaining content. Use the same <write file="..."> tag format.` },
+      ], { temperature: 0.2 });
+      if (continuation.length > 50) {
+        content = content.trimEnd() + '\n' + continuation;
+        onUpdate(content);
+      } else {
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+  return content;
+}
+
 // ─── Stream Reader ───────────────────────────────────────────────────────────
 
 async function readStream(response: Response): Promise<string> {
@@ -177,6 +235,17 @@ export function checkLocalQuality(blocks: Array<{ type: string; path: string; co
     if (block.type !== 'write' || !block.content) continue;
     const c = block.content;
     const path = block.path;
+
+    // Minimum content thresholds (catch truncated outputs)
+    if (path.endsWith('.html') && c.length < 1500) {
+      issues.push({ type: 'truncation', file: path, detail: `HTML is only ${c.length} chars — too short, output was likely cut off` });
+    }
+    if (path.endsWith('.css') && c.length < 600) {
+      issues.push({ type: 'truncation', file: path, detail: `CSS is only ${c.length} chars — too short, output was likely cut off` });
+    }
+    if (path.endsWith('.js') && c.length < 250) {
+      issues.push({ type: 'truncation', file: path, detail: `JS is only ${c.length} chars — too short, output was likely cut off` });
+    }
 
     // Check truncation: file ends mid-statement (only for files > 1KB)
     if (c.length > 1000) {
@@ -342,22 +411,48 @@ export async function runMultiAgentPipeline(opts: PipelineOptions): Promise<Pipe
     
     // Step 1: Generate HTML first
     try {
-      const htmlPrompt = `Create a COMPLETE index.html file for this request. Use <write file="index.html"> tags.
-Include ALL sections with REAL content — no placeholders. 200+ lines.
-Use these CSS classes EXACTLY (CSS and JS will reference them):
-- nav: .navbar, .nav-container, .nav-logo, .nav-toggle, .nav-links
-- hero: .hero, .hero-container, .hero-headline, .hero-subtitle, .hero-cta
-- features: .features, .features-container, .section-title, .features-grid, .feature-card, .feature-icon, .feature-title, .feature-description
-- pricing: .pricing, .pricing-container, .pricing-grid, .pricing-card, .pricing-tier, .pricing-price, .pricing-features, .pricing-cta, .pricing-badge
-- footer: .footer, .footer-container, .footer-grid, .footer-col, .footer-bottom
-- scroll-to-top: .scroll-to-top
-- Use Font Awesome icons: <i class="fas fa-icon-name"></i> (include CDN in <head>)
-- IDs: #features, #pricing, #contact`;
+      const htmlPrompt = `Create a COMPLETE index.html file for this request. Use <write file="index.html"> tags. Output 250+ lines.
 
-      const htmlContent = await callModel([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `${userMessage}\n\n${htmlPrompt}` },
-      ]);
+MANDATORY SECTIONS (use REAL product names, prices, descriptions — never "Lorem ipsum" or "Feature 1"):
+1. <nav class="navbar"> with logo, 3-4 nav links, and a CTA button (.btn-nav). Include hamburger <button class="nav-toggle"> for mobile.
+2. <section class="hero"> with .hero-badge, .hero-headline (h1), .hero-subtitle (p), .hero-actions (primary + secondary buttons), and .hero-stats (3 stat cards).
+3. <section id="features" class="features"> with .section-badge, .section-title, .section-subtitle, and .features-grid containing 6 .feature-card items — each with .feature-icon (Font Awesome), h3, p.
+4. <section id="pricing" class="pricing"> with .pricing-grid containing 3 .pricing-card items (Starter $0, Pro $19, Enterprise Custom). Middle one has class "featured" and a .popular-badge. Each card has h3, .price, .price-desc, .pricing-features (ul of 4-5 features with <i class="fas fa-check">), and a CTA link.
+5. <section id="testimonials" class="testimonials"> with 2 .testimonial-card items — each with 5-star .stars, p quote, .testimonial-author (avatar + name + role).
+6. <section id="cta" class="cta-section"> with h2, p, and a .btn-primary .btn-large.
+7. <footer class="footer"> with .footer-grid (4 columns: brand+desc, Product links, Company links, Legal links), .footer-bottom (copyright + .social-links with GitHub/Twitter/Discord icons).
+8. <button class="scroll-to-top" aria-label="Scroll to top"> at the end of body.
+
+HEAD requirements:
+- <meta charset="UTF-8">, <meta name="viewport">, <meta name="description"> (real SEO description, not generic), <title> with the product name
+- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"> (Font Awesome CDN)
+- <link rel="stylesheet" href="styles.css">
+- <script src="script.js"></script> at the end of body
+- Every <section> must have an id for anchor navigation.
+
+Use these CSS class names EXACTLY (CSS and JS will reference them):
+.navbar .nav-container .nav-logo .nav-toggle .nav-links .btn-nav
+.hero .hero-container .hero-badge .hero-headline .hero-subtitle .hero-actions .hero-stats .stat .stat-number .stat-label
+.btn-primary .btn-secondary .btn-outline .btn-large
+.gradient-text
+.section-badge .section-title .section-subtitle .container
+.features .features-grid .feature-card .feature-icon
+.pricing .pricing-grid .pricing-card .pricing-card.featured .popular-badge .price .price-desc .pricing-features
+.testimonials .testimonials-grid .testimonial-card .stars .testimonial-author .avatar
+.cta-section
+.footer .footer-grid .footer-brand .footer-col .footer-bottom .social-links
+.scroll-to-top
+
+Output ONLY the <write> tag. No markdown, no commentary, no preamble.`;
+
+      const htmlContent = await generateWithContinuation(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `${userMessage}\n\n${htmlPrompt}` },
+        ],
+        'html',
+        (text) => onStreamUpdate(text, 'Generating HTML...')
+      );
       if (htmlContent.length > 50) {
         allContents.push(htmlContent);
         onStreamUpdate(htmlContent, 'Generated HTML — creating CSS...');
@@ -367,22 +462,62 @@ Use these CSS classes EXACTLY (CSS and JS will reference them):
     // Step 2: Generate CSS — must match HTML classes exactly
     try {
       const htmlClasses = extractClassesFromHtml(allContents[0] || '');
-      const cssPrompt = `Create a COMPLETE styles.css file. Use <write file="styles.css"> tags.
-CRITICAL: You MUST style EXACTLY these classes and IDs from the HTML (no other classes):
+      const cssPrompt = `Create a COMPLETE styles.css file. Use <write file="styles.css"> tags. Output 350+ lines.
+
+CRITICAL: Style EXACTLY these classes and IDs from the HTML (do not invent new ones):
 ${htmlClasses}
 
-Requirements:
-- CSS variables for colors (--primary-color, --background-color, etc.)
-- Dark theme: #0a0a0a background, white text, #0070f3 accent
-- Responsive: mobile-first with breakpoints at 768px and 480px
-- Flexbox/Grid layouts for cards
-- Smooth transitions and hover effects
-- 200+ lines. Every class from the HTML must have styles.`;
+DESIGN SYSTEM (use CSS variables at the top):
+:root {
+  --primary-color: #0070f3;
+  --background-color: #0a0a0a;
+  --card-bg: #111111;
+  --card-border: #1a1a1a;
+  --text-color: #ffffff;
+  --text-muted: #cccccc;
+  --border-color: #333333;
+  --gradient-end: #00bfff;
+}
 
-      const cssContent = await callModel([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: cssPrompt },
-      ]);
+REQUIREMENTS:
+- Universal reset (* { margin: 0; padding: 0; box-sizing: border-box; })
+- body: font-family: 'Inter', -apple-system, sans-serif; background: var(--background-color); color: var(--text-color); line-height: 1.7
+- .container: width: 90%; max-width: 1200px; margin: 0 auto; padding: 4rem 0
+- .section-title: font-size: clamp(2rem, 4vw, 3rem); line-height: 1.2; margin-bottom: 1rem
+- .gradient-text: background: linear-gradient(90deg, var(--primary-color), var(--gradient-end)); -webkit-background-clip: text; -webkit-text-fill-color: transparent
+- Buttons (.btn-primary .btn-secondary .btn-outline): padding 1rem 2.5rem; border-radius 30px; transition: all 0.3s ease; cursor pointer
+- .btn-primary: background linear-gradient(90deg, primary, gradient-end); color white; box-shadow 0 4px 15px rgba(0,112,243,0.2); :hover { transform: translateY(-4px); box-shadow glow }
+- Cards (.feature-card, .pricing-card, .testimonial-card): background var(--card-border); border 1px solid var(--border-color); border-radius 12px; padding 2rem; :hover { transform: translateY(-8px); box-shadow glow }
+- .pricing-card.featured: transform: scale(1.05); border-color: var(--primary-color); box-shadow: 0 0 30px rgba(0,112,243,0.3)
+- .popular-badge: position absolute; top -15px; left 50%; transform translateX(-50%); background var(--primary-color); color white; padding 0.3rem 1rem; border-radius 20px
+- Grids (.features-grid, .pricing-grid, .testimonials-grid): display grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem
+- .navbar: position sticky; top 0; z-index 100; background rgba(10,10,10,0.8); backdrop-filter: blur(10px); display flex; justify-content space-between
+- .nav-toggle: display none (shown on mobile via @media)
+- .hero: min-height 80vh; display flex; align-items center; text-align center; background linear-gradient(180deg, var(--background-color), var(--gradient-end))
+- .stat-number: font-size 2rem; font-weight 700
+- .footer: background #111; border-top 1px solid var(--border-color); padding 4rem 0 2rem
+- .footer-grid: display grid; grid-template-columns: repeat(4, 1fr); gap 2rem
+- .scroll-to-top: position fixed; bottom 30px; right 30px; background var(--primary-color); width 50px; height 50px; border-radius 50%; display none
+- .scroll-to-top.visible: display block; opacity 1
+- Animations: hover transitions 0.3s ease, transform translateY(-4px to -8px) on card hover
+- .stars: color var(--gradient-end); margin-bottom 1rem
+- .avatar: width 50px; height 50px; border-radius 50%; background var(--primary-color); display flex; align-items center; justify-content center; font-weight 600
+
+RESPONSIVE (mobile-first):
+@media (max-width: 992px) { grids → 2 columns; .pricing-card.featured { transform: none; } }
+@media (max-width: 768px) { .nav-links { display: none; } .nav-toggle { display: block; } .features-grid, .pricing-grid, .testimonials-grid { grid-template-columns: 1fr; } .footer-grid { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 480px) { .hero h1 { font-size: 2.2rem; } .footer-grid { grid-template-columns: 1fr; } }
+
+Output ONLY the <write> tag. No markdown, no commentary, no preamble. Every class from the HTML must have styles.`;
+
+      const cssContent = await generateWithContinuation(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: cssPrompt },
+        ],
+        'css',
+        (text) => onStreamUpdate(text, 'Generating CSS...')
+      );
       if (cssContent.length > 50) {
         allContents.push(cssContent);
         onStreamUpdate(allContents.join('\n\n'), 'Generated CSS — creating JS...');
@@ -392,21 +527,32 @@ Requirements:
     // Step 3: Generate JS — must reference HTML elements exactly
     try {
       const htmlElements = extractElementsFromHtml(allContents[0] || '');
-      const jsPrompt = `Create a COMPLETE script.js file. Use <write file="script.js"> tags.
+      const jsPrompt = `Create a COMPLETE script.js file. Use <write file="script.js"> tags. Output 100+ lines.
+
 CRITICAL: Only reference elements that exist in the HTML:
 ${htmlElements}
 
-Include:
-- Mobile nav toggle (use .nav-toggle and .nav-links classes)
-- Smooth scroll for anchor links
-- Scroll-to-top button visibility toggle (use .scroll-to-top class)
-- Scroll animations for feature cards (use .feature-card class)
-- 80+ lines. Only use selectors that match the HTML above.`;
+INCLUDE ALL OF THESE (vanilla JS, no libraries):
+1. MOBILE NAV TOGGLE: Click .nav-toggle to toggle 'nav-open' class on .nav-links. Close menu when a link is clicked. Hide toggle if screen width > 768px on resize.
+2. SMOOTH SCROLL: All anchor links (a[href^="#"]) scroll smoothly to target section. Account for sticky navbar height (~80px) using scroll-margin-top or offset calculation.
+3. SCROLL-TO-TOP: Show .scroll-to-top button (add 'visible' class) when window.scrollY > 300. Click scrolls smoothly to top. Hide when scrolled back to top.
+4. SCROLL ANIMATIONS: Use IntersectionObserver to add 'visible' class to .feature-card, .pricing-card, .testimonial-card when they enter viewport. Use unobserve after triggering. Add a fadeInUp keyframe (opacity 0 → 1, translateY 30px → 0) over 0.6s ease-out.
+5. NAVBAR BACKGROUND: Add 'scrolled' class to .navbar (or .page-header) when window.scrollY > 50, removing when back at top. CSS variable transition: background-color 0.3s ease.
+6. STAT COUNTER ANIMATION: Animate .stat-number from 0 to its final value over 2 seconds when in viewport (use requestAnimationFrame, easeOutCubic easing). Parse the value (handle '50K+', '99.9%', '4.9/5' formats).
+7. ACTIVE NAV LINK HIGHLIGHT: Use IntersectionObserver to track which section is currently in view and add 'active' class to corresponding .nav-links a. Remove from others.
 
-      const jsContent = await callModel([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: jsPrompt },
-      ]);
+DOMContentLoaded wrapper around all code. Add event listeners (not inline onclick). Use const/let (no var). Add a small console.log('Vibe Coder Pro loaded') at the end.
+
+Output ONLY the <write> tag. No markdown, no commentary, no preamble.`;
+
+      const jsContent = await generateWithContinuation(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: jsPrompt },
+        ],
+        'js',
+        (text) => onStreamUpdate(text, 'Generating JS...')
+      );
       if (jsContent.length > 50) {
         allContents.push(jsContent);
         onStreamUpdate(allContents.join('\n\n'), 'Generated JS — checking quality...');
